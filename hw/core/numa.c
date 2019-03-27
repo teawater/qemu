@@ -855,10 +855,11 @@ static void numa_stat_memory_devices(NumaNodeMem node_mem[])
 {
     MemoryDeviceInfoList *info_list = qmp_memory_device_list();
     MemoryDeviceInfoList *info;
-    PCDIMMDeviceInfo     *pcdimm_info;
     VirtioPMEMDeviceInfo *vpi;
+    VirtioMEMDeviceInfo *vmi;
 
     for (info = info_list; info; info = info->next) {
+        PCDIMMDeviceInfo *pcdimm_info = NULL;;
         MemoryDeviceInfo *value = info->value;
 
         if (value) {
@@ -876,6 +877,11 @@ static void numa_stat_memory_devices(NumaNodeMem node_mem[])
                 /* TODO: once we support numa, assign to right node */
                 node_mem[0].node_mem += vpi->size;
                 node_mem[0].node_plugged_mem += vpi->size;
+                break;
+            case MEMORY_DEVICE_INFO_KIND_VIRTIO_MEM:
+                vmi = value->u.virtio_mem.data;
+                node_mem[vmi->node].node_mem += vmi->size;
+                node_mem[vmi->node].node_plugged_mem += vmi->size;
                 break;
             default:
                 g_assert_not_reached();
