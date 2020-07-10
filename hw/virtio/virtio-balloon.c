@@ -138,7 +138,8 @@ static void balloon_inflate_page(VirtIOBalloon *balloon,
 }
 
 static void balloon_deflate_page(VirtIOBalloon *balloon,
-                                 MemoryRegion *mr, hwaddr mr_offset)
+                                 MemoryRegion *mr, hwaddr mr_offset,
+                                 size_t size)
 {
     void *addr = memory_region_get_ram_ptr(mr) + mr_offset;
     ram_addr_t rb_offset;
@@ -153,10 +154,11 @@ static void balloon_deflate_page(VirtIOBalloon *balloon,
     rb_page_size = qemu_ram_pagesize(rb);
 
     host_addr = (void *)((uintptr_t)addr & ~(rb_page_size - 1));
+    size &= ~(rb_page_size - 1);
 
     /* When a page is deflated, we hint the whole host page it lives
      * on, since we can't do anything smaller */
-    ret = qemu_madvise(host_addr, rb_page_size, QEMU_MADV_WILLNEED);
+    ret = qemu_madvise(host_addr, size, QEMU_MADV_WILLNEED);
     if (ret != 0) {
         warn_report("Couldn't MADV_WILLNEED on balloon deflate: %s",
                     strerror(errno));
@@ -354,7 +356,7 @@ static void virtio_balloon_handle_output(VirtIODevice *vdev, VirtQueue *vq)
             pa = (hwaddr) p << VIRTIO_BALLOON_PFN_SHIFT;
             offset += 4;
 
-            if (vq == s->icvq) {
+            if (vq == s->icvq || vq == s->dcvq) {
                 uint32_t psize_ptr;
                 if (iov_to_buf(elem->out_sg, elem->out_num, offset, &psize_ptr, 4) != 4) {
                     break;
@@ -383,8 +385,9 @@ static void virtio_balloon_handle_output(VirtIODevice *vdev, VirtQueue *vq)
                     balloon_inflate_page(s, section.mr,
                                          section.offset_within_region,
                                          psize, &pbp);
-                } else if (vq == s->dvq) {
-                    balloon_deflate_page(s, section.mr, section.offset_within_region);
+                } else if (vq == s->dvq || vq == s->dcvq) {
+                    balloon_deflate_page(s, section.mr, section.offset_within_region,
+                                         psize);
                 } else {
                     g_assert_not_reached();
                 }
@@ -838,6 +841,7 @@ static void virtio_balloon_device_realize(DeviceState *dev, Error **errp)
 
     if (virtio_has_feature(s->host_features, VIRTIO_BALLOON_F_CONT_PAGES)) {
         s->icvq = virtio_add_queue(vdev, 128, virtio_balloon_handle_output);
+        s->dcvq = virtio_add_queue(vdev, 128, virtio_balloon_handle_output);
     }
 
     reset_stats(s);
